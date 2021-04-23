@@ -159,20 +159,10 @@ impl TokenSignature {
 
             // ei = hash_message(public_keys[i], messages[i]);
             // eiXi_res = sum(ei * public_keys[i]) for i from 0 to public_keys.len()
+            // a buffer full of zeroes is the identity point
             let mut eiXi_res = [0u8; crypto_core_ristretto255_BYTES as usize];
 
-            // libsodium does not have a function to give the identity element
-            // so we generate eiXi from the first element
-            {
-                let mut e0 = hash_message(public_keys[0], &messages[0]);
-                crypto_scalarmult_ristretto255(
-                    eiXi_res.as_mut_ptr(),
-                    e0.as_ptr(),
-                    public_keys[0].as_ptr()
-                );
-            }
-
-            for i in 1..public_keys.len() {
+            for i in 0..public_keys.len() {
                 let mut eiXi = [0u8; crypto_core_ristretto255_BYTES as usize];
 
                 let mut ei = hash_message(public_keys[i], &messages[i]);
@@ -193,16 +183,8 @@ impl TokenSignature {
             // ei = hash_message(public_keys[i], messages[i]);
             // diAi_res = sum(hash_points([Ai]) * Ai) for i from 0 to public_keys.len()
             let mut diAi_res = [0u8; crypto_core_ristretto255_BYTES as usize];
-            {
-                let mut d0 = hash_points(&[self.parameters[0]]);
-                crypto_scalarmult_ristretto255(
-                    diAi_res.as_mut_ptr(),
-                    d0.as_ptr(),
-                    self.parameters[0].as_ptr()
-                );
-            }
 
-            for i in 1..public_keys.len() {
+            for i in 0..public_keys.len() {
                 let mut diAi = [0u8; crypto_core_ristretto255_BYTES as usize];
 
                 let mut di = hash_points(&[self.parameters[i]]);
