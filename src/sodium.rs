@@ -313,20 +313,13 @@ impl TokenSignature {
               hex::encode(eiXi_res),
               hex::encode(diAi_res));
 
+            // res should be the identity point (all zeroes)
+            let verified = 1 == sodium_is_zero(res.as_ptr(), res.len());
 
-            // res should be the identity point
-            let mut res2 = [0u8; crypto_core_ristretto255_BYTES as usize];
-            crypto_core_ristretto255_sub(
-                res2.as_mut_ptr(),
-                res.as_ptr(),
-                res.as_ptr());
-
-
-            let verified = res == res2;
             println!("\nchecking that res({}) == identity point({}): {}",
               hex::encode(res),
               hex::encode([0u8; crypto_core_ristretto255_BYTES as usize]),
-              verified
+              verified,
             );
 
             if verified {
