@@ -60,22 +60,25 @@ impl Token {
     pub fn new(root_key_pair: &KeyPair, message: Vec<u8>) -> Self {
         let signature = TokenSignature::sign_one_message(root_key_pair, &message);
 
-        println!("first z: {}", hex::encode(signature.z));
-        Token {
+        let res = Token {
             messages: vec![message],
             keys: vec![root_key_pair.public],
             signature,
-        }
+        };
+
+        println!("new token:\n{}", res);
+        res
     }
 
     pub fn append(&self, key_pair: &KeyPair, message: Vec<u8>) -> Self {
         let new_signature = TokenSignature::sign_one_message(key_pair, &message);
         let aggregated_signature = TokenSignature::aggregate(&self.signature, &new_signature);
 
-        println!("new z: {}, aggregated: {}",
-                 hex::encode(new_signature.z),
-                 hex::encode(aggregated_signature.z),
-                 );
+        println!("new signature:\n{}\naggregated:\n{}",
+             new_signature,
+             aggregated_signature,
+        );
+
         let mut new_token = Token {
             messages: self.messages.clone(),
             keys: self.keys.clone(),
@@ -85,6 +88,7 @@ impl Token {
         new_token.messages.push(message);
         new_token.keys.push(key_pair.public);
 
+        println!("aggregated token:\n{}", new_token);
         new_token
     }
 
@@ -93,27 +97,57 @@ impl Token {
     }
 }
 
+impl fmt::Display for Token {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Token {{
+    messages: [ {} ],
+    keys: [ {} ],
+    signature: {},
+}}",
+          self.messages.iter().map(|msg| format!("\"{}\"", String::from_utf8_lossy(msg))).collect::<Vec<_>>().join(", "),
+          self.keys.iter().map(hex::encode).collect::<Vec<_>>().join(", "),
+          self.signature,
+          )
+    }
+}
+
 impl TokenSignature {
     pub fn sign_one_message(key_pair: &KeyPair, message: &[u8]) -> Self {
+        println!("\nkey {} will sign the message \"{}\"", key_pair, String::from_utf8_lossy(message));
         unsafe {
             // r <- random scalar
             let mut r = [0u8; crypto_core_ristretto255_SCALARBYTES as usize];
             crypto_core_ristretto255_scalar_random(r.as_mut_ptr());
 
+            println!("r <- random scalar: {}", hex::encode(r));
+
             // A = r * BASEPOINT
             let mut A = [0u8; crypto_core_ristretto255_BYTES as usize];
-            crypto_scalarmult_ristretto255_base(A.as_mut_ptr(), r.as_ptr());
+            let res = crypto_scalarmult_ristretto255_base(A.as_mut_ptr(), r.as_ptr());
+            // res = -1 if r was 0
+            if res != 0 {
+                panic!("invalid r value");
+            }
+
+            println!("A = G^r: {}", hex::encode(A));
 
             let d = hash_points(&[A]);
+            println!("d = hash_points([A]): {}", hex::encode(d));
             let e = hash_message(key_pair.public, &message);
+            println!("e = hash_message(public_key, message): {}", hex::encode(e));
 
             // let z = r * d - e * keypair.private;
             let mut r_d = [0u8; crypto_core_ristretto255_SCALARBYTES as usize];
             crypto_core_ristretto255_scalar_mul(r_d.as_mut_ptr(), r.as_ptr(), d.as_ptr());
+            println!("r * d: {}", hex::encode(r_d));
+
             let mut e_privatekey = [0u8; crypto_core_ristretto255_SCALARBYTES as usize];
             crypto_core_ristretto255_scalar_mul(e_privatekey.as_mut_ptr(), e.as_ptr(), key_pair.private.as_ptr());
+            println!("e * private_key: {}", hex::encode(e_privatekey));
+
             let mut z = [0u8; crypto_core_ristretto255_SCALARBYTES as usize];
             crypto_core_ristretto255_scalar_sub(z.as_mut_ptr(), r_d.as_ptr(), e_privatekey.as_ptr());
+            println!("z = r * d - e * keypair.private: {}", hex::encode(z));
 
             TokenSignature {
                 parameters: vec![A],
@@ -133,6 +167,11 @@ impl TokenSignature {
                 z.as_mut_ptr(),
                 first.z.as_ptr(),
                 second.z.as_ptr());
+            println!("aggregate: z({}) = z1({}) + z2({})",
+              hex::encode(z),
+              hex::encode(first.z),
+              hex::encode(second.z),
+              );
 
             TokenSignature {
                 parameters,
@@ -142,6 +181,7 @@ impl TokenSignature {
     }
 
     pub fn verify(&self, public_keys: &[PublicKey], messages: &[Vec<u8>]) -> Result<(), error::Signature> {
+        println!("\nwill verify token");
         if !(public_keys.len() == messages.len() && public_keys.len() == self.parameters.len()) {
             println!("invalid data");
             return Err(error::Signature::InvalidFormat);
@@ -155,8 +195,14 @@ impl TokenSignature {
         unsafe {
             // zP = z * BASEPOINT
             let mut zP = [0u8; crypto_core_ristretto255_BYTES as usize];
-            crypto_scalarmult_ristretto255_base(zP.as_mut_ptr(), self.z.as_ptr());
+            let res = crypto_scalarmult_ristretto255_base(zP.as_mut_ptr(), self.z.as_ptr());
+            // res = -1 if z was 0
+            if res != 0 {
+                panic!("invalid z value");
+            }
+            println!("zP = G^z: {}", hex::encode(zP));
 
+            println!("\ncalculating sum of public_keys[i]^hash_message(public_keys[i], message[i])");
             // ei = hash_message(public_keys[i], messages[i]);
             // eiXi_res = sum(ei * public_keys[i]) for i from 0 to public_keys.len()
             // a buffer full of zeroes is the identity point
@@ -177,10 +223,22 @@ impl TokenSignature {
                     eiXi_res_tmp.as_mut_ptr(),
                     eiXi_res.as_ptr(),
                     eiXi.as_ptr());
+
+                println!("pubkeys[{}]: {}, messages[{}]: {}",
+                  i, hex::encode(public_keys[i]),
+                  i, hex::encode(&messages[i]),
+                );
+
+                println!("eiXi({}) = eiXi({}) + pubkeys[{}]^(hash_message(pubkeys[{}], messages[{}])) ({})",
+                  hex::encode(eiXi_res_tmp),
+                  hex::encode(eiXi_res),
+                  i, i, i,
+                  hex::encode(eiXi),
+                );
                 eiXi_res = eiXi_res_tmp;
             }
 
-            // ei = hash_message(public_keys[i], messages[i]);
+            println!("\ncalculating sum of A[i]^hash_points(A[i])");
             // diAi_res = sum(hash_points([Ai]) * Ai) for i from 0 to public_keys.len()
             let mut diAi_res = [0u8; crypto_core_ristretto255_BYTES as usize];
 
@@ -201,9 +259,19 @@ impl TokenSignature {
                     diAi_res.as_ptr(),
                     diAi.as_ptr());
 
+                println!("A[{}]: {}, d[{}] = hash_points(A[{}]): {}",
+                  i, hex::encode(self.parameters[i]),
+                  i, i, hex::encode(di),
+                );
+
+                println!("diAi({}) = diAi({}) + A[{}]^di[{}]({})",
+                  hex::encode(diAi_res_tmp),
+                  hex::encode(diAi_res),
+                  i, i, hex::encode(diAi),
+                );
+
                 diAi_res = diAi_res_tmp;
             }
-
 
             // let res = zP + eiXi_res - diAi_res;
             let mut res_tmp = [0u8; crypto_core_ristretto255_BYTES as usize];
@@ -218,6 +286,13 @@ impl TokenSignature {
                 res_tmp.as_ptr(),
                 diAi_res.as_ptr());
 
+            println!("\nres({}) = zP({}) + eiXi({}) - diAi({})",
+              hex::encode(res),
+              hex::encode(zP),
+              hex::encode(eiXi_res),
+              hex::encode(diAi_res));
+
+
             // res should be the identity point
             let mut res2 = [0u8; crypto_core_ristretto255_BYTES as usize];
             crypto_core_ristretto255_sub(
@@ -225,14 +300,32 @@ impl TokenSignature {
                 res.as_ptr(),
                 res.as_ptr());
 
-            println!("identity test: res = {}, res2 = {}",
-                     hex::encode(res), hex::encode(res2));
-            if res == res2 {
+
+            let verified = res == res2;
+            println!("\nchecking that res({}) == identity point({}): {}",
+              hex::encode(res),
+              hex::encode([0u8; crypto_core_ristretto255_BYTES as usize]),
+              verified
+            );
+
+            if verified {
                 Ok(())
             } else {
                 Err(error::Signature::InvalidSignature)
             }
         }
+    }
+}
+
+impl fmt::Display for TokenSignature {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "TokenSignature {{
+    parameters: [ {} ],
+    z: {},
+}}",
+          self.parameters.iter().map(hex::encode).collect::<Vec<_>>().join(", "),
+          hex::encode(self.z),
+          )
     }
 }
 
