@@ -112,6 +112,6 @@ mod tests {
 
         let token3_s: sodium::Token = token3_d.into();
         assert_eq!(token3_s.verify(), Ok(()), "cannot verify third token (sodium)");
-        panic!();
+        //panic!();
     }
 }
