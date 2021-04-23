@@ -99,7 +99,7 @@ impl PublicKey {
 
 #[allow(dead_code)]
 /// test structure for aggregated signatures
-struct Token {
+pub struct Token {
     pub messages: Vec<Vec<u8>>,
     pub keys: Vec<PublicKey>,
     pub signature: TokenSignature,
