@@ -16,12 +16,15 @@ impl KeyPair {
         // calling FFI functions require the unsafe indicator
         unsafe {
             let mut private = [0u8; crypto_core_ristretto255_SCALARBYTES as usize];
-            //FIXME: test return values
             crypto_core_ristretto255_scalar_random(private.as_mut_ptr());
 
             let mut public = [0u8; crypto_core_ristretto255_BYTES as usize];
             // generate a point in the Ristretto group from the scalar and the generator
-            crypto_scalarmult_ristretto255_base(public.as_mut_ptr(), private.as_ptr());
+            let err = crypto_scalarmult_ristretto255_base(public.as_mut_ptr(), private.as_ptr());
+            // err = -1 if private key was 0
+            if err != 0 {
+                panic!("invalid private key");
+            }
 
             KeyPair { private, public }
         }
@@ -123,9 +126,9 @@ impl TokenSignature {
 
             // A = r * BASEPOINT
             let mut A = [0u8; crypto_core_ristretto255_BYTES as usize];
-            let res = crypto_scalarmult_ristretto255_base(A.as_mut_ptr(), r.as_ptr());
-            // res = -1 if r was 0
-            if res != 0 {
+            let err = crypto_scalarmult_ristretto255_base(A.as_mut_ptr(), r.as_ptr());
+            // err = -1 if r was 0
+            if err != 0 {
                 panic!("invalid r value");
             }
 
@@ -195,9 +198,9 @@ impl TokenSignature {
         unsafe {
             // zP = z * BASEPOINT
             let mut zP = [0u8; crypto_core_ristretto255_BYTES as usize];
-            let res = crypto_scalarmult_ristretto255_base(zP.as_mut_ptr(), self.z.as_ptr());
-            // res = -1 if z was 0
-            if res != 0 {
+            let err = crypto_scalarmult_ristretto255_base(zP.as_mut_ptr(), self.z.as_ptr());
+            // err = -1 if z was 0
+            if err != 0 {
                 panic!("invalid z value");
             }
             println!("zP = G^z: {}", hex::encode(zP));
@@ -212,17 +215,23 @@ impl TokenSignature {
                 let mut eiXi = [0u8; crypto_core_ristretto255_BYTES as usize];
 
                 let mut ei = hash_message(public_keys[i], &messages[i]);
-                crypto_scalarmult_ristretto255(
+                let err = crypto_scalarmult_ristretto255(
                     eiXi.as_mut_ptr(),
                     ei.as_ptr(),
                     public_keys[i].as_ptr()
                 );
+                if err != 0 {
+                    println!("eiXi is the identity element");
+                }
 
                 let mut eiXi_res_tmp = [0u8; crypto_core_ristretto255_BYTES as usize];
-                crypto_core_ristretto255_add(
+                let res = crypto_core_ristretto255_add(
                     eiXi_res_tmp.as_mut_ptr(),
                     eiXi_res.as_ptr(),
                     eiXi.as_ptr());
+                if err != 0 {
+                    panic!("invalid eiXi_res and/or eiXi");
+                }
 
                 println!("pubkeys[{}]: {}, messages[{}]: {}",
                   i, hex::encode(public_keys[i]),
@@ -247,17 +256,23 @@ impl TokenSignature {
 
                 let mut di = hash_points(&[self.parameters[i]]);
 
-                crypto_scalarmult_ristretto255(
+                let err = crypto_scalarmult_ristretto255(
                     diAi.as_mut_ptr(),
                     di.as_ptr(),
                     self.parameters[i].as_ptr()
                 );
+                if err != 0 {
+                    println!("diAi is the identity element");
+                }
 
                 let mut diAi_res_tmp = [0u8; crypto_core_ristretto255_BYTES as usize];
-                crypto_core_ristretto255_add(
+                let err = crypto_core_ristretto255_add(
                     diAi_res_tmp.as_mut_ptr(),
                     diAi_res.as_ptr(),
                     diAi.as_ptr());
+                if err != 0 {
+                    panic!("invalid diAi_res and/or diAi");
+                }
 
                 println!("A[{}]: {}, d[{}] = hash_points(A[{}]): {}",
                   i, hex::encode(self.parameters[i]),
@@ -275,16 +290,22 @@ impl TokenSignature {
 
             // let res = zP + eiXi_res - diAi_res;
             let mut res_tmp = [0u8; crypto_core_ristretto255_BYTES as usize];
-            crypto_core_ristretto255_add(
+            let err = crypto_core_ristretto255_add(
                 res_tmp.as_mut_ptr(),
                 zP.as_ptr(),
                 eiXi_res.as_ptr());
+            if err != 0 {
+                panic!("invalid zP and/or eiXi_res");
+            }
 
             let mut res = [0u8; crypto_core_ristretto255_BYTES as usize];
-            crypto_core_ristretto255_sub(
+            let err = crypto_core_ristretto255_sub(
                 res.as_mut_ptr(),
                 res_tmp.as_ptr(),
                 diAi_res.as_ptr());
+            if err != 0 {
+                panic!("invalid res_tmp and/or diAi_res");
+            }
 
             println!("\nres({}) = zP({}) + eiXi({}) - diAi({})",
               hex::encode(res),
