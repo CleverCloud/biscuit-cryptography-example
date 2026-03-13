@@ -1,3 +1,6 @@
+> [!NOTE]
+  > This repository is pinned to specific versions and is intentionally not updated. It serves as a reference
+
 # example implementation for Biscuit token cryptography
 
 To aid in the implementation of [Biscuit tokens](https://github.com/CleverCloud/biscuit)
